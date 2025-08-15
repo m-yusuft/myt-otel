@@ -326,6 +326,7 @@ function HomePage({ navigate, user }) {
                                             <p>Toplam Oda: {room.totalRooms}</p>
                                             <p>Dolu Oda: {room.bookedRooms || 0}</p>
                                             <p>Mevcut Oda: {availableRooms}</p>
+                                            <p>Durum: {availableRooms > 0 ? <span className="text-green-600 font-semibold">Müsait</span> : <span className="text-red-600 font-semibold">Dolu</span>}</p>
                                         </div>
                                         {availableRooms > 0 ? (
                                             <button
@@ -1013,6 +1014,8 @@ function AdminPanel({ user, navigate }) {
     const [showMessageBox, setShowMessageBox] = useState(false);
     const [messageContent, setMessageContent] = useState('');
     const [messageType, setMessageBoxType] = useState('');
+    const [filterStartDate, setFilterStartDate] = useState('');
+    const [filterEndDate, setFilterEndDate] = useState('');
 
     const showMessage = (message, type) => {
         setMessageContent(message);
@@ -1030,20 +1033,16 @@ function AdminPanel({ user, navigate }) {
         const reservationsColRef = collection(db, getCollectionPath('reservations'));
         const unsubscribeReservations = onSnapshot(reservationsColRef, (snapshot) => {
             const res = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            console.log("AdminPanel - Fetched Reservations:", res);
             setReservations(res.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
         }, (error) => {
-            console.error("Rezervasyonlar çekilirken hata oluştu:", error);
             showMessage('Rezervasyonlar yüklenirken bir hata oluştu.', 'error');
         });
 
         const roomTypesColRef = collection(db, getCollectionPath('roomTypes'));
         const unsubscribeRoomTypes = onSnapshot(roomTypesColRef, (snapshot) => {
             const types = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            console.log("AdminPanel - Fetched Room Types:", types);
             setRoomTypes(types);
         }, (error) => {
-            console.error("Oda türleri çekilirken hata oluştu:", error);
             showMessage('Oda türleri yüklenirken bir hata oluştu.', 'error');
         });
 
@@ -1170,6 +1169,27 @@ function AdminPanel({ user, navigate }) {
     const bookedRoomsCount = roomTypes.reduce((sum, room) => sum + (room.bookedRooms || 0), 0);
     const availableRoomsCount = totalRoomsCount - bookedRoomsCount;
 
+    const getRoomPrice = (roomTypeId) => {
+        const room = roomTypes.find(r => r.id === roomTypeId);
+        return room ? Number(room.price) : 0;
+    };
+
+    const filteredReservations = reservations.filter(res => {
+        if (!filterStartDate && !filterEndDate) return true;
+        const checkIn = new Date(res.checkInDate);
+        if (filterStartDate && checkIn < new Date(filterStartDate)) return false;
+        if (filterEndDate && checkIn > new Date(filterEndDate)) return false;
+        return true;
+    });
+
+    const totalAmount = filteredReservations.reduce((sum, res) => {
+        if (res.status === 'Onaylandı') {
+            const price = getRoomPrice(res.roomTypeId);
+            const nights = Math.max(1, (new Date(res.checkOutDate) - new Date(res.checkInDate)) / (1000 * 60 * 60 * 24));
+            return sum + price * nights;
+        }
+        return sum;
+    }, 0);
 
     return (
         <div className="min-h-screen bg-gray-100 flex">
@@ -1196,7 +1216,7 @@ function AdminPanel({ user, navigate }) {
                                 className={`w-full text-left px-4 py-2 rounded-md flex items-center space-x-3 transition duration-200 ${activeTab === 'reservations' ? 'bg-purple-600 text-white shadow-md' : 'hover:bg-gray-700 text-gray-300'}`}
                             >
                                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                                 </svg>
                                 <span>Rezervasyonlar</span>
                             </button>
@@ -1249,13 +1269,11 @@ function AdminPanel({ user, navigate }) {
                         <p className="text-gray-600 mt-1">Hoş geldiniz, {user?.email || 'Admin'}!</p>
                     </div>
                 </header>
-
                 {showMessageBox && (
                     <div className={`fixed top-4 right-4 p-4 rounded-md shadow-lg z-50 ${messageType === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
                         {messageContent}
                     </div>
                 )}
-
                 {activeTab === 'dashboard' && (
                     <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
                         <div className="bg-white p-6 rounded-lg shadow-md border border-blue-200">
@@ -1282,13 +1300,42 @@ function AdminPanel({ user, navigate }) {
                             <h3 className="text-lg font-semibold text-teal-700 mb-2">Mevcut Oda Sayısı</h3>
                             <p className="text-4xl font-bold text-teal-900">{availableRoomsCount}</p>
                         </div>
+                        <div className="bg-white p-6 rounded-lg shadow-md border border-indigo-200">
+                            <h3 className="text-lg font-semibold text-indigo-700 mb-2">Toplam Tutar (Onaylı)</h3>
+                            <p className="text-4xl font-bold text-indigo-900">{totalAmount.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 2 })}</p>
+                        </div>
                     </section>
                 )}
-
                 {activeTab === 'reservations' && (
                     <section className="bg-white p-6 rounded-lg shadow-md">
                         <h2 className="text-2xl font-semibold text-gray-800 mb-6 pb-4 border-b">Tüm Rezervasyonlar</h2>
-                        {reservations.length === 0 ? (
+                        <div className="flex flex-wrap gap-4 mb-6">
+                            <div>
+                                <label className="block text-sm text-gray-700 mb-1">Giriş Tarihi (Başlangıç):</label>
+                                <input
+                                    type="date"
+                                    value={filterStartDate}
+                                    onChange={e => setFilterStartDate(e.target.value)}
+                                    className="border rounded px-2 py-1"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm text-gray-700 mb-1">Giriş Tarihi (Bitiş):</label>
+                                <input
+                                    type="date"
+                                    value={filterEndDate}
+                                    onChange={e => setFilterEndDate(e.target.value)}
+                                    className="border rounded px-2 py-1"
+                                />
+                            </div>
+                            <button
+                                onClick={() => { setFilterStartDate(''); setFilterEndDate(''); }}
+                                className="self-end bg-gray-300 hover:bg-gray-400 text-gray-800 px-3 py-1 rounded"
+                            >
+                                Temizle
+                            </button>
+                        </div>
+                        {filteredReservations.length === 0 ? (
                             <p className="text-gray-600 text-center py-8">Henüz hiç rezervasyon yok.</p>
                         ) : (
                             <div className="overflow-x-auto">
@@ -1301,12 +1348,13 @@ function AdminPanel({ user, navigate }) {
                                             <th className="py-3 px-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Giriş</th>
                                             <th className="py-3 px-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Çıkış</th>
                                             <th className="py-3 px-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Misafir Sayısı</th>
+                                            <th className="py-3 px-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Oda Ücreti</th>
                                             <th className="py-3 px-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Durum</th>
                                             <th className="py-3 px-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">İşlemler</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {reservations.map((res, index) => (
+                                        {filteredReservations.map((res, index) => (
                                             <tr key={res.id} className={`border-b border-gray-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition duration-150`}>
                                                 <td className="py-3 px-4 text-sm text-gray-800">{res.guestName}</td>
                                                 <td className="py-3 px-4 text-sm text-gray-800">{res.guestEmail}</td>
@@ -1314,6 +1362,9 @@ function AdminPanel({ user, navigate }) {
                                                 <td className="py-3 px-4 text-sm text-gray-800">{res.checkInDate}</td>
                                                 <td className="py-3 px-4 text-sm text-gray-800">{res.checkOutDate}</td>
                                                 <td className="py-3 px-4 text-sm text-gray-800">{res.numGuests}</td>
+                                                <td className="py-3 px-4 text-sm text-gray-800">
+                                                    {getRoomPrice(res.roomTypeId).toLocaleString('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 2 })}
+                                                </td>
                                                 <td className="py-3 px-4">
                                                     <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-sm ${
                                                         res.status === 'Beklemede' ? 'bg-yellow-200 text-yellow-800' :
@@ -1355,7 +1406,6 @@ function AdminPanel({ user, navigate }) {
                         )}
                     </section>
                 )}
-
                 {activeTab === 'roomTypes' && (
                     <section className="bg-white p-6 rounded-lg shadow-md">
                         <h2 className="text-2xl font-semibold text-gray-800 mb-6 pb-4 border-b">Oda Tipleri Yönetimi</h2>
@@ -1378,8 +1428,8 @@ function AdminPanel({ user, navigate }) {
                                         )}
                                         <h4 className="text-xl font-bold text-gray-900 mb-2">{room.name}</h4>
                                         <p className="text-gray-600 mb-1 text-sm flex-grow">{room.description}</p>
-                                        <p className="text-gray-700 font-semibold mt-2">Fiyat: {room.price} TL</p>
-                                        <div className="text-sm text-gray-500 mt-1">
+                                        <p className="text-lg font-semibold text-blue-600 mb-3">Fiyat: {room.price} TL</p>
+                                        <div className="text-sm text-gray-500 mb-3">
                                             <p>Toplam Oda: {room.totalRooms}</p>
                                             <p>Dolu Oda: {room.bookedRooms || 0}</p>
                                             <p>Mevcut Oda: {room.totalRooms - (room.bookedRooms || 0)}</p>
@@ -1403,7 +1453,7 @@ function AdminPanel({ user, navigate }) {
 
             {showConfirmModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white p-8 rounded-lg shadow-2xl w-full max-w-sm text-center transform scale-105 transition-transform duration-300 border border-gray-300">
+                    <div className="bg-white p-8 rounded-lg shadow-2xl w-full max-w-sm text-center transform scale-105 transition-transform duration-300">
                         <h3 className="text-2xl font-bold text-gray-800 mb-4">Emin Misiniz?</h3>
                         <p className="text-gray-700 mb-6">Bu işlemi geri alamazsınız. Devam etmek istediğinizden emin misiniz?</p>
                         <div className="flex justify-center space-x-4">
@@ -1458,7 +1508,6 @@ function ProfilePage({ user, navigate }) {
             const res = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setUserReservations(res.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
         }, (error) => {
-            console.error("Kullanıcı rezervasyonları çekilirken hata oluştu:", error);
             showMessage('Rezervasyonlarınız yüklenirken bir hata oluştu.', 'error');
         });
 
@@ -1466,23 +1515,23 @@ function ProfilePage({ user, navigate }) {
         const unsubscribeRoomTypes = onSnapshot(roomTypesColRef, (snapshot) => {
             const types = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setRoomTypes(types);
-        }, (error) => {
-            console.error("Oda türleri çekilirken hata oluştu:", error);
-        });
-
-
+        }, (error) => {});
         return () => {
             unsubscribeReservations();
             unsubscribeRoomTypes();
         };
     }, [user]);
 
+    const getRoomInfo = (roomTypeId) => {
+        const room = roomTypes.find(r => r.id === roomTypeId);
+        return room || {};
+    };
+
     const handleLogout = async () => {
         try {
             await signOut(auth);
             navigate('/');
         } catch (error) {
-            console.error("Çıkış yaparken hata oluştu:", error);
             showMessage('Çıkış yaparken bir hata oluştu.', 'error');
         }
     };
@@ -1524,17 +1573,14 @@ function ProfilePage({ user, navigate }) {
         }
     };
 
-
     return (
         <div className="min-h-screen bg-gray-50 flex flex-col">
             <Navbar navigate={navigate} user={user} />
-            
             {showMessageBox && (
                 <div className={`fixed top-4 right-4 p-4 rounded-md shadow-lg z-50 ${messageType === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
                     {messageContent}
                 </div>
             )}
-
             <main className="flex-1 p-4 md:p-8 mt-20">
                 <header className="bg-gradient-to-r from-blue-700 to-indigo-800 text-white p-6 rounded-lg shadow-xl mb-8 flex justify-between items-center">
                     <div>
@@ -1570,39 +1616,45 @@ function ProfilePage({ user, navigate }) {
                         )
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {userReservations.map((res, index) => (
-                                <div key={res.id} className="bg-white border border-gray-200 rounded-lg shadow-sm p-5 hover:shadow-md transition duration-200 flex flex-col">
-                                    <h3 className="text-xl font-bold text-gray-900 mb-2">{res.roomTypeName}</h3>
-                                    <div className="text-gray-700 text-sm mb-3 flex-grow">
-                                        <p><span className="font-semibold">Giriş:</span> {res.checkInDate}</p>
-                                        <p><span className="font-semibold">Çıkış:</span> {res.checkOutDate}</p>
-                                        <p><span className="font-semibold">Misafir Sayısı:</span> {res.numGuests}</p>
-                                        <p className="mt-2">
-                                            <span className="font-semibold">Durum: </span>
-                                            <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-sm ${
-                                                res.status === 'Beklemede' ? 'bg-yellow-200 text-yellow-800' :
-                                                res.status === 'Onaylandı' ? 'bg-green-200 text-green-800' :
-                                                'bg-red-200 text-red-800'
-                                            }`}>
-                                                {res.status}
-                                            </span>
+                            {userReservations.map((res, index) => {
+                                const room = getRoomInfo(res.roomTypeId);
+                                const availableRooms = room.totalRooms ? room.totalRooms - (room.bookedRooms || 0) : '-';
+                                return (
+                                    <div key={res.id} className="bg-white border border-gray-200 rounded-lg shadow-sm p-5 hover:shadow-md transition duration-200 flex flex-col">
+                                        <h3 className="text-xl font-bold text-gray-900 mb-2">{res.roomTypeName}</h3>
+                                        <div className="text-gray-700 text-sm mb-3 flex-grow">
+                                            <p><span className="font-semibold">Giriş:</span> {res.checkInDate}</p>
+                                            <p><span className="font-semibold">Çıkış:</span> {res.checkOutDate}</p>
+                                            <p><span className="font-semibold">Misafir Sayısı:</span> {res.numGuests}</p>
+                                            <p><span className="font-semibold">Oda Ücreti:</span> {room.price ? `${room.price} TL/Gece` : '-'}</p>
+                                            <p><span className="font-semibold">Müsaitlik:</span> {availableRooms > 0 ? <span className="text-green-600 font-semibold">Müsait</span> : <span className="text-red-600 font-semibold">Dolu</span>}</p>
+                                            <p className="mt-2">
+                                                <span className="font-semibold">Durum: </span>
+                                                <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-sm ${
+                                                    res.status === 'Beklemede' ? 'bg-yellow-200 text-yellow-800' :
+                                                    res.status === 'Onaylandı' ? 'bg-green-200 text-green-800' :
+                                                    'bg-red-200 text-red-800'
+                                                }`}>
+                                                    {res.status}
+                                                </span>
+                                            </p>
+                                        </div>
+                                        <p className="text-xs text-gray-500 mt-auto pt-3 border-t border-gray-100">
+                                            Rezervasyon Tarihi: {new Date(res.timestamp).toLocaleDateString('tr-TR', {
+                                                year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                                            })}
                                         </p>
+                                        {res.status === 'Beklemede' && (
+                                            <button
+                                                onClick={() => confirmCancel(res)}
+                                                className="mt-4 w-full bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-md font-semibold shadow-md transition duration-300"
+                                            >
+                                                Rezervasyonu İptal Et
+                                            </button>
+                                        )}
                                     </div>
-                                    <p className="text-xs text-gray-500 mt-auto pt-3 border-t border-gray-100">
-                                        Rezervasyon Tarihi: {new Date(res.timestamp).toLocaleDateString('tr-TR', {
-                                            year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                                        })}
-                                    </p>
-                                    {res.status === 'Beklemede' && (
-                                        <button
-                                            onClick={() => confirmCancel(res)}
-                                            className="mt-4 w-full bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-md font-semibold shadow-md transition duration-300"
-                                        >
-                                            Rezervasyonu İptal Et
-                                        </button>
-                                    )}
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </section>
